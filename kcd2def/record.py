@@ -3,7 +3,7 @@ from itertools import zip_longest
 from dataclasses import dataclass, field, fields, replace
 
 from dataclasses_json import DataClassJsonMixin
-from json import loads
+from json import loads, dumps
 
 from typing import Literal, Optional, Any
 import types
@@ -31,13 +31,22 @@ def record(cls):
 
 class Record(DataClassJsonMixin):
     base: 'Record'
-    kind: type['Record']
+    kind: str
     
     def __init_subclass__(cls, **kwargs: Any) -> None:
-        # https://github.com/pydantic/pydantic/discussions/4706#discussioncomment-4404440
+        # https://github.com/pydantic/pydantic/discussions/4706#discussioncomment-4404440            
         cls.__annotations__['kind'] = str #Literal[cls.__name__]
         cls.kind = field(default=cls.__name__,repr=False)
-        
+
+    @classmethod
+    def _get_subclasses(cls):
+        yield cls
+        for subclass in cls.__subclasses__():
+            yield from subclass._get_subclasses()
+            
+    @classmethod
+    def _get_subclass_union(cls):
+        return Union[tuple(cls._get_subclasses())]
 
     def join(self, other: 'Record') -> Optional['Record']:
         """combine the information of two similar records or fail"""
@@ -80,9 +89,21 @@ def merge(a,b):
     
     if type(a) != type(b):
         return None
-    
+
+    if isinstance(a,set):
+        res = set()
+        ret = set()
+        for x in a:
+            for y in b:
+                if y not in res:
+                    z = merge(x,y)
+                    if z is not None:
+                        x = z
+                        res.add(y)
+            ret.add(x)
+        return ret | (res ^ b)
     if isinstance(a,list):
-        return tuple(map(merge_pair,zip_longest(a,b,fillvalue=None)))
+        return list(map(merge_pair,zip_longest(a,b,fillvalue=None)))
     if isinstance(a,dict):
         ret = dict(a)
         for k,v in b.items():
@@ -99,7 +120,7 @@ def into_dict(record: Record) -> dict:
     return record.to_dict()
 
 def into_json(record: Record) -> str:
-    return record.to_json()
+    return dumps(into_dict(record),indent = 2)
 
 def from_dict(data: dict) -> Record:
     cls = records[data['kind']]

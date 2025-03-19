@@ -1,33 +1,28 @@
 from dataclasses import replace, field
 from record import record, Record, from_dict
+from collections.abc import Collection
 from typing import Literal, Optional, Union
 
 __all__ = [
-    'Type',
     'NilType',
     'ValueType',
     'TableType',
     'ChunkType',
+    'BuiltinType',
     'PresentType',
     'ReferenceType',
     
-    'Tag',
-    'Type',
     'Origin',
     'Definition',
 
-    'TypeTag',
-    'AliasTag',
-    'UsesTag',
-    'HasTag',
-    'IsTag',
+    'LuaType'
+    'AliasType',
+    'PolyType',
+    'Type',
 
     'FileOrigin',
-    'EngineOrigin',
-    'RuntimeOrigin',
+    'GlobalOrigin',
     'ScriptOrigin',
-    'ScripBindOrigin',
-    'LoaderOrigin',
     'BuiltinOrigin',
 
     'ClassDefinition',
@@ -44,86 +39,78 @@ TableType = Literal['table','userdata']
 ChunkType = Literal['function','thread']
 ReferenceType = Union[TableType,ChunkType]
 PresentType = Union[ValueType, ReferenceType]
-Type = Union[NilType, PresentType, 'unknown']
+BuiltinType = Union[NilType, PresentType]
 
 
 ## Records
 
-class Tag(Record):
-    data: object
+@record
+class Relation(Record):
+    pass
 
+@record
 class Origin(Record):
     pass
 
+@record
 class Definition(Record):
     """a lua definition entry"""
     # formatted description
     desc: Optional[str] = None
     # formatted usage examples
     uses: Optional[str] = None
-    # source of the definition
+    # sources of the definition
     orig: list[Origin] = field(default_factory=list)
-
-
-## Tags
-
-@record
-class TypeTag(Tag):
-    data: Type = 'unknown'
-    @classmethod
-    def pure(cls):
-        return True
-    def join(self, other):
-        if self.data == 'unknown':
-            return other
-        if other.data == 'unknown':
-            return self
-        return None
-
-@record
-class AliasTag(Tag):
-    data: str
-    @classmethod
-    def pure(cls):
-        return True
-    def join(self, other):
-        return None
-
-
-@record
-class UsesTag(Tag):
-    data: set[Union[TypeTag,AliasTag]] = field(default_factory=set)
-    """association/dependency"""
+    # has this been manually verified by a human?
+    good: bool = False
     
+    # silly way of making a set without hashability:
     def join(self, other):
-        a = self.data
-        b = other.data
-        res = set()
-        ret = set()
-        for x in a:
-            for y in b:
-                if y not in res:
-                    z = merge(x,y)
-                    if z is not None:
-                        x = z
-                        res.add(y)
-            ret.add(x)
-        return type(self)(ret | (res ^ b))
-
+        result = super().join(other)
+        orig_by_type = {}
+        for o in self.orig:
+            t = type(o)
+            ot = orig_by_type.get(t,None)
+            if ot is None:
+                ot = o
+            else:
+                ot = ot.join(o)
+            orig_by_type[t] = ot
+        return replace(result,orig=list(orig_by_type.values()))
     @classmethod
-    def make(cls,kvs,infer_missing = False) -> 'UsesTag':
+    def make(cls):
+        result = cls.from_dict(kvs,infer_missing = infer_missing)
+        return result.join(result)
+
+@record
+class LuaType(Record):
+    name: BuiltinType
+    @classmethod
+    def pure(cls):
+        return True
+    def join(self, other):
+        return None
+
+@record
+class AliasType(Record):
+    name: str
+    @classmethod
+    def pure(cls):
+        return True
+    def join(self, other):
+        return None
+
+Type = Union[AliasType,LuaType]
+
+@record
+class PolyType(Record):
+    many: set[Type] = field(default_factory=set)
+    """association/dependency"""
+    @classmethod
+    def make(cls,kvs,infer_missing = False) -> 'PolyType':
         rec = cls.from_dict(kvs,infer_missing = infer_missing)
-        return replace(rec,data=set(map(from_dict,rec.data)))
-
-@record
-class HasTag(Tag):
-    """composition/aggregation"""
-    data: dict[str,UsesTag] = field(default_factory=dict)
-
-@record
-class IsTag(Tag):
-    """inheritance/generalisation"""
-    data: Optional[Union[TypeTag,AliasTag]] = None
+        form = set(map(from_dict,rec.form))
+        return replace(rec,form=form)
 
 
 ## Origins
@@ -135,50 +122,46 @@ class GlobalOrigin(Origin):
 
 @record
 class FileOrigin(Origin):
+    """the location of the file (in game-specific notation)"""
     file: str
 
 @record
-class EngineOrigin(Origin):
-    pass
-
-@record
-class RuntimeOrigin(Origin):
-    pass
-
-@record
-class ScriptOrigin(FileOrigin):
-    line: int
-    char: int
-
-@record
-class ScriptBindOrigin(EngineOrigin):
-    pass
-
-@record
-class LoaderOrigin(EngineOrigin):
-    pass
-
-@record
-class BuiltinOrigin(EngineOrigin):
+class BuiltinOrigin(Origin):
     show: bool = False
+
+@record
+class ScriptOrigin(Origin):
+    # line defined
+    line: int
+    # last line defined
+    last: Optional[int] = None
+    # initiating character
+    init: Optional[int] = None
+    # terminating character
+    term: Optional[int] = None
 
 
 ## Definitions
 
 @record
 class TableDefinition(Definition):
-    flds: HasTag = field(default_factory=HasTag)
-    meta: IsTag = field(default_factory=IsTag)
+    flds: dict[str,PolyType] = field(default_factory=dict)
+    meta: Optional[Type] = None
 
 @record
 class ClassDefinition(TableDefinition):
-    call: UsesTag = field(default_factory=UsesTag)
+    call: PolyType = field(default_factory=PolyType)
 
 @record
 class FunctionDefinition(Definition):
-    args: HasTag = field(default_factory=HasTag)
-    rets: HasTag = field(default_factory=HasTag)
-    call: UsesTag = field(default_factory=UsesTag)
+    # sequence of the arg/param names
+    para: list[str] = field(default_factory=list)
+    # types of the args/params by name
+    args: list[PolyType] = field(default_factory=list)
+    # sequence of types of the return values
+    rets: list[PolyType] = field(default_factory=list)
+    # types this function creates or interacts with
+    call: PolyType = field(default_factory=PolyType)
 
 
 ## Structure

@@ -27,6 +27,8 @@ class State:
     lg: 'lupa._LuaTable'
     ltype: 'lupa._LuaFunction'
     lstr: 'lupa._LuaFunction'
+    lgetinfo: 'lupa._LuaFunction'
+    lbuiltins: 'lupa._LuaTable'
     
     root_path: Path
 
@@ -42,8 +44,31 @@ class State:
         _lg = lua.globals()
         _ltype = _lg.type
         _lstr = _lg.tostring
+        _lgetinfo = _lg.debug.getinfo
+        _lbuiltins = lua.execute("""
+            local builtins = {}
+            local function scan(tbl)
+                local todo = {}
+                if builtins[tbl] then return end
+                local b = {}
+                builtins[tbl] = b
+                for k,v in pairs(tbl) do
+                    if type(v) == 'table' then
+                        todo[v] = true
+                    end
+                    b[k] = true
+                end
+                for stbl in pairs(todo) do
+                    todo[stbl] = nil
+                    scan(stbl)
+                end
+            end
+            scan(_G)
+            return builtins
+        """)
         
-        return cls(defs, files, nodes, lua, _lg, _ltype, _lstr, *args, **kwargs)
+        
+        return cls(defs, files, nodes, lua, _lg, _ltype, _lstr, _lgetinfo, _lbuiltins, *args, **kwargs)
 
 def pass1_mark_nodes(state,node):
     for subnode in ast.walk(node):
@@ -213,31 +238,47 @@ def prepare_info(state,rdefn,path=None,tbl=None,seen=None):
         seen = {}
     if tbl is None:
         tbl = state.lg
+        seen[state.lstr(tbl)] = 'global-_G'
     todo = []
 
     for k,v in tbl.items():
-        if state.lstr(v) not in seen and state.ltype(k) == 'string':
+        if state.ltype(k) == 'string':
             t = state.ltype(v)
             subpath = k
             defn = None
             if path is not None:
                 subpath = path + '.' + k
-            fd = rdefn.flds.data.get(k,None)
-            if fd is None:
-                fd = schema.UsesTag()
-                rdefn.flds.data[k] = fd
+            fld = rdefn.flds.get(k,None)
+            if fld is None:
+                fld = schema.PolyType()
+                rdefn.flds[k] = fld
             name = 'global-' + subpath
-            if t == 'table':
-                defn = schema.TableDefinition()
-                todo.append((defn,subpath,v))
-                seen[state.lstr(v)] = name
-            elif t == 'function':
-                defn = schema.FunctionDefinition()
-            else:
-                fd.data.add(schema.TypeTag(data=t))
-            if defn is not None:
-                state.root.defs[name] = defn
-                fd.data.add(schema.AliasTag(data=name))
+            fld.many.add(schema.AliasType(name=name))
+            if state.lstr(v) not in seen:
+                if t == 'table':
+                    defn = schema.TableDefinition()
+                    todo.append((defn,subpath,v))
+                    seen[state.lstr(v)] = name
+                elif t == 'function':
+                    defn = schema.FunctionDefinition()
+                else:
+                    fld.many.add(schema.LuaType(name=t))
+                if defn is not None:
+                    if state.lbuiltins[v]:
+                        defn.orig.append(schema.BuiltinOrigin())
+                    else:
+                        # TODO: associate file origin (currently muddled by lupa)
+                        if t == 'function':
+                            # TODO: also associate script origin for other types
+                            # TODO: associate more script origin info
+                            info = state.lgetinfo(v)
+                            defn.orig.append(schema.ScriptOrigin(
+                                line = info.linedefined
+                                ))
+                    defn.orig.append(schema.GlobalOrigin(
+                        path = subpath
+                        ))
+                    state.root.defs[name] = defn
     for d,k,v in todo:
         prepare_info(state,d,k,v,seen)
 
@@ -265,6 +306,8 @@ if __name__ == '__main__':
     run_scripts(state.lua)
 
     rdefn = schema.TableDefinition()
-    state.root.defs['globals'] = rdefn
+    rdefn.orig.append(schema.BuiltinOrigin(show=True))
+    rdefn.orig.append(schema.GlobalOrigin(path='_G'))
+    state.root.defs['global-_G'] = rdefn
     prepare_info(state,rdefn)
     dump_info(state, "test.json")
