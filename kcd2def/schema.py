@@ -78,7 +78,7 @@ class Definition(Record):
             orig_by_type[t] = ot
         return replace(result,orig=list(orig_by_type.values()))
     @classmethod
-    def make(cls):
+    def make(cls,kvs,infer_missing = False):
         result = cls.from_dict(kvs,infer_missing = infer_missing)
         return result.join(result)
 
@@ -109,8 +109,8 @@ class PolyType(Record):
     @classmethod
     def make(cls,kvs,infer_missing = False) -> 'PolyType':
         rec = cls.from_dict(kvs,infer_missing = infer_missing)
-        form = set(map(from_dict,rec.form))
-        return replace(rec,form=form)
+        many = set(map(from_dict,rec.many))
+        return replace(rec,many=many)
 
 
 ## Origins
@@ -154,12 +154,18 @@ class ClassDefinition(TableDefinition):
 
 @record
 class FunctionDefinition(Definition):
-    # sequence of the arg/param names
-    para: list[str] = field(default_factory=list)
-    # types of the args/params by name
-    args: list[PolyType] = field(default_factory=list)
-    # sequence of types of the return values
-    rets: list[PolyType] = field(default_factory=list)
+    # param names
+    argn: list[str] = field(default_factory=list)
+    # param types
+    argt: list[PolyType] = field(default_factory=list)
+    # param descriptions
+    argd: list[str] = field(default_factory=list)
+    # return names
+    retn: list[str] = field(default_factory=list)
+    # return types
+    rett: list[PolyType] = field(default_factory=list)
+    # return descriptions
+    retd: list [str] = field(default_factory=list)
     # types this function creates or interacts with
     call: PolyType = field(default_factory=PolyType)
 

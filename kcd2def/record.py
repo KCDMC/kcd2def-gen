@@ -35,7 +35,7 @@ class Record(DataClassJsonMixin):
     
     def __init_subclass__(cls, **kwargs: Any) -> None:
         # https://github.com/pydantic/pydantic/discussions/4706#discussioncomment-4404440            
-        cls.__annotations__['kind'] = str #Literal[cls.__name__]
+        cls.__annotations__['kind'] = Literal[cls.__name__]
         cls.kind = field(default=cls.__name__,repr=False)
 
     @classmethod
@@ -122,9 +122,21 @@ def into_dict(record: Record) -> dict:
 def into_json(record: Record) -> str:
     return dumps(into_dict(record),indent = 2)
 
+def convert(data,idx=None):
+    if isinstance(data,dict):
+        kind = data.get('kind',None)
+        for k,v in data.copy().items():
+            data[k] = convert(v,k)
+        if kind is not None:
+            cls = records[kind]
+            return cls.make(data)
+    elif isinstance(data,list):
+        for i,v in enumerate(data):
+            data[i] = convert(v,i)
+    return data
+
 def from_dict(data: dict) -> Record:
-    cls = records[data['kind']]
-    return cls.make(data)
+    return convert(data)
 
 def from_json(json: str) -> Record:
     data = loads(json)

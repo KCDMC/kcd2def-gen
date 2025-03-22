@@ -70,6 +70,9 @@ class State:
                     if type(v) == 'table' then
                         todo[v] = true
                     end
+                    if type(v) == 'function' then
+                        builtins[v] = tbl
+                    end
                     b[k] = true
                 end
                 for stbl in pairs(todo) do
@@ -230,6 +233,7 @@ def scan_directory(state, path, mode):
     return found
 
 reject_paths = {'Scripts/Quests/'}
+reject_global_paths = {'package.loaded'}
 
 def reject_path(path):
     for subpath in reject_paths:
@@ -267,6 +271,8 @@ def prepare_info(state,rdefn,path=None,tbl=None,seen=None):
             defn = None
             if path is not None:
                 subpath = path + '.' + k
+            if subpath in reject_global_paths:
+                continue
             fld = rdefn.flds.get(k,None)
             if fld is None:
                 fld = schema.PolyType()
@@ -305,7 +311,7 @@ def prepare_info(state,rdefn,path=None,tbl=None,seen=None):
                                     ))
                                 args = interrogate_function(state,file,subpath,line,last)
                                 assert len(args) == 1 or len(set(args.values())) == 1
-                                defn.para = list(tuple(args.values())[0])
+                                defn.argn = list(tuple(args.values())[0])
                     defn.orig.append(schema.GlobalOrigin(
                         path = subpath
                         ))
