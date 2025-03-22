@@ -275,10 +275,11 @@ def prepare_info(state,rdefn,path=None,tbl=None,seen=None):
                 continue
             fld = rdefn.flds.get(k,None)
             if fld is None:
-                fld = schema.PolyType()
+                fld = schema.Field()
+                fld.type = schema.PolyType()
                 rdefn.flds[k] = fld
             name = 'global-' + subpath
-            fld.many.add(schema.AliasType(name=name))
+            fld.type.many.add(schema.AliasType(name=name))
             if state.lstr(v) not in seen:
                 if t == 'table':
                     defn = schema.TableDefinition()
@@ -287,7 +288,7 @@ def prepare_info(state,rdefn,path=None,tbl=None,seen=None):
                 elif t == 'function':
                     defn = schema.FunctionDefinition()
                 else:
-                    fld.many.add(schema.LuaType(name=t))
+                    fld.type.many.add(schema.LuaType(name=t))
                 if defn is not None:
                     if state.lbuiltins[v]:
                         defn.orig.append(schema.BuiltinOrigin())
@@ -311,7 +312,7 @@ def prepare_info(state,rdefn,path=None,tbl=None,seen=None):
                                     ))
                                 args = interrogate_function(state,file,subpath,line,last)
                                 assert len(args) == 1 or len(set(args.values())) == 1
-                                defn.argn = list(tuple(args.values())[0])
+                                defn.args = list(map(lambda n: schema.Param(name=n),tuple(args.values())[0]))
                     defn.orig.append(schema.GlobalOrigin(
                         path = subpath
                         ))

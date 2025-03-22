@@ -20,6 +20,9 @@ __all__ = [
     'PolyType',
     'Type',
 
+    'Field',
+    'Param',
+
     'FileOrigin',
     'GlobalOrigin',
     'ScriptOrigin',
@@ -105,13 +108,20 @@ Type = Union[AliasType,LuaType]
 @record
 class PolyType(Record):
     many: set[Type] = field(default_factory=set)
-    """association/dependency"""
     @classmethod
     def make(cls,kvs,infer_missing = False) -> 'PolyType':
         rec = cls.from_dict(kvs,infer_missing = infer_missing)
         many = set(map(from_dict,rec.many))
         return replace(rec,many=many)
 
+@record
+class Field(Record):
+    type: Optional[PolyType] = None
+    desc: Optional[str] = None
+
+@record
+class Param(Field):
+    name: Optional[str] = None
 
 ## Origins
 
@@ -145,29 +155,18 @@ class ScriptOrigin(Origin):
 
 @record
 class TableDefinition(Definition):
-    flds: dict[str,PolyType] = field(default_factory=dict)
+    flds: dict[str,Field] = field(default_factory=dict)
     meta: Optional[Type] = None
 
 @record
 class ClassDefinition(TableDefinition):
-    call: PolyType = field(default_factory=PolyType)
+    call: Optional[PolyType] = None
 
 @record
 class FunctionDefinition(Definition):
-    # param names
-    argn: list[str] = field(default_factory=list)
-    # param types
-    argt: list[PolyType] = field(default_factory=list)
-    # param descriptions
-    argd: list[str] = field(default_factory=list)
-    # return names
-    retn: list[str] = field(default_factory=list)
-    # return types
-    rett: list[PolyType] = field(default_factory=list)
-    # return descriptions
-    retd: list [str] = field(default_factory=list)
-    # types this function creates or interacts with
-    call: PolyType = field(default_factory=PolyType)
+    args: list[Param] = field(default_factory=list)
+    rets: list[Param] = field(default_factory=list)
+    call: Optional[PolyType] = None
 
 
 ## Structure
