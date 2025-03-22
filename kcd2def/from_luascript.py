@@ -21,14 +21,18 @@ class NodeInfo:
 class State:
     root: schema.Root
     files: dict[str,str]
-    nodes: dict[int,NodeInfo]
     
     lua: lupa.LuaRuntime
-    lg: 'lupa._LuaTable'
+    
+    lglobals: 'lupa._LuaTable'
     ltype: 'lupa._LuaFunction'
     lstr: 'lupa._LuaFunction'
+    lloadfile: 'lupa._LuaFunction'
+    lloadstring: 'lupa._LuaFunction'
+    lsetfenv:'lupa._LuaFunction'
     lgetinfo: 'lupa._LuaFunction'
     lbuiltins: 'lupa._LuaTable'
+    lenv: 'lupa._LuaTable'
     
     root_path: Path
 
@@ -38,15 +42,25 @@ class State:
     def init(cls,*args,**kwargs):
         defs = schema.Root()
         files = {}
-        nodes = {}
         
         lua = lupa.LuaRuntime(unpack_returned_tuples=True)
-        _lg = lua.globals()
-        _ltype = _lg.type
-        _lstr = _lg.tostring
-        _lgetinfo = _lg.debug.getinfo
+        _lglobals = lua.globals()
+        _ltype = _lglobals.type
+        _lstr = _lglobals.tostring
+        _lloadfile = _lglobals.loadfile
+        _lloadstring = _lglobals.loadstring
+        _lsetfenv = _lglobals.setfenv
+        _lgetinfo = _lglobals.debug.getinfo
+
+        _lenv = lua.execute("""
+            __luascript_env = {}
+            return __luascript_env
+            
+        """)
+
         _lbuiltins = lua.execute("""
             local builtins = {}
+
             local function scan(tbl)
                 local todo = {}
                 if builtins[tbl] then return end
@@ -63,96 +77,93 @@ class State:
                     scan(stbl)
                 end
             end
-            scan(_G)
+
+            local env = __luascript_env
+            __luascript_env = nil
+
+            for k,v in pairs(_G) do
+                env[k] = v
+            end
+            env._G = env
+            
+            scan(env)
+
+            __luascript_env = env
             return builtins
         """)
         
-        
-        return cls(defs, files, nodes, lua, _lg, _ltype, _lstr, _lgetinfo, _lbuiltins, *args, **kwargs)
-
-def pass1_mark_nodes(state,node):
-    for subnode in ast.walk(node):
-        if subnode != node:
-            visit(state, subnode, scope = node)
-
-class Pass1_Visitor(ast.ASTVisitor):
-    state: State
-    
-    def __init__(self,state: State, *args, **kwargs):
-        self.state = state
-        super().__init__(*args,**kwargs)
-    
-    def visit_Function(self, node):
-        info = visit(self.state, node)
-        if not info.scope:
-            pass1_mark_nodes(self.state, node)
-
-    def visit_Method(self, node):
-        info = visit(self.state, node)
-        if not info.scope:
-            pass1_mark_nodes(self.state, node)
-
-    def visit_AnonymousFunction(self, node):
-        info = visit(self.state, node)
-        if not info.scope:
-            pass1_mark_nodes(self.state, node)
-
-    def visit_Assign(self, node):
-        info = visit(self.state, node)
-        if not info.scope:
-            pass1_mark_nodes(self.state, node)
-
-class Pass2_Visitor(ast.ASTVisitor):
-    state: State
-    
-    def __init__(self,state: State, *args, **kwargs):
-        self.state = state
-        super().__init__(*args,**kwargs)
-
-    #def visit_Function(self, node):
-        #info = visit(self.state, node)
-        #if not info.scope:
-            #source = ast.to_lua_source(node)
-            #print(source)
-            #print(ast.to_pretty_str(node))
-
-    #def visit_Method(self, node):
-        #info = visit(self.state, node)
-        #if not info.scope:
-            #source = ast.to_lua_source(node)
-            #print(source)
-            #print(ast.to_pretty_str(node))
-
-    #def visit_AnonymousFunction(self, node):
-        #info = visit(self.state, node)
-        #if not info.scope:
-            #source = ast.to_lua_source(node)
-            #print(source)
-            #print(ast.to_pretty_str(node))
-
-    def visit_Assign(self, node):
-        info = visit(self.state, node)
-        if not info.scope:
-            source = ast.to_lua_source(node)
-            print(source)
-            #print(ast.to_pretty_str(node))
+        return cls(defs, files, lua,
+                   _lglobals, _ltype, _lstr, _lloadfile, _lloadstring,
+                   _lsetfenv, _lgetinfo, _lbuiltins, _lenv,
+                   *args, **kwargs)
 
 def parse(tree):
     with redirect_stdout(None):
         return ast.parse(tree)
 
-def visit(state, node, **kwargs):
-    key = id(node)
-    info = state.nodes.get(key,None)
-    if info is None:
-        info = NodeInfo(**kwargs)
-        state.nodes[key] = info
-    else:
-        for k,v in kwargs.items():
-            setattr(info,k,v)
+def purge_function_bodies(tree):
+    for node in ast.walk(tree):
+        if type(node) in {astnodes.Function, astnodes.Method, astnodes.AnonymousFunction}:
+            node.body.body.clear()
 
-    #print(key,info)
-    return info
+def interrogate_function_node(state,name,node):
+    args = []
+    for arg in node.args:
+        _arg = ast.to_lua_source(arg)
+        args.append(_arg)
+    _name = name
+    if hasattr(node,'name'):
+        _name = ast.to_lua_source(node.name)
+        if _name == name:
+            print('-- FUNC: ',name,'ON',', '.join(args))
+        else:
+            print('-- FUNC: ',_name,'AS',name,'ON',', '.join(args))
+    return name, tuple(args)
+
+class InterrogateFunction_Visitor(ast.ASTVisitor):
+    state: State
+    name: str
+    args: dict
+    
+    def __init__(self,state: State, name: str, *args, **kwargs):
+        self.state = state
+        self.name = name
+        self.args = {}
+        super().__init__(*args,**kwargs)
+    
+    def visit_Function(self, node):
+        name, args = interrogate_function_node(self.state, self.name, node)
+        assert self.args.get(name,args) == args
+        self.args[name] = args
+
+    def visit_Method(self, node):
+        name, args = interrogate_function_node(self.state, self.name, node)
+        assert self.args.get(name,args) == args
+        self.args[name] = args
+
+    def visit_AnonymousFunction(self, node):
+        name, args = interrogate_function_node(self.state, self.name, node)
+        assert self.args.get(name,args) == args
+        self.args[name] = args
+
+def interrogate_function(state,path,name,line,last):
+    data = state.files[path]
+    lines = data.split('\n')
+    code = '\n'.join(lines[line-1:last])
+    
+    tree = parse(code)
+    purge_function_bodies(tree)
+
+    visitor = InterrogateFunction_Visitor(state,name)    
+    visitor.visit(tree)
+
+    return visitor.args
+
+def load_string(state, data):
+    return state.lua.execute(f"""
+        setfenv(1,__luascript_env)
+        {data}
+    """)
 
 def load_script(state, path):
     if isinstance(path, Path):
@@ -168,17 +179,17 @@ def load_script(state, path):
         with open(path) as file:
             data = file.read()
     except FileNotFoundError:
-        print('-- MISSING: ', path)
+        print('-- NOPE: ', path)
         return
     
     state.current_file_path = path
     state.files[path] = data
-    
 
-    tree = parse(data)
-    #Pass1_Visitor(state).visit(tree)
-    #Pass2_Visitor(state).visit(tree)
-    state.lua.execute(data)
+    return state.lua.execute(f"""
+        local chunk = loadfile("{path}")
+        setfenv(chunk,__luascript_env)
+        return chunk()
+    """)
 
 def scan_directory(state, path, mode):
     
@@ -226,18 +237,26 @@ def reject_path(path):
             return True
     return False
 
-def load_scripts(loader):
-    loader('Scripts/common.lua')
-    loader('Scripts/main.lua')
+def prepare_state(state):
+    load_string(state,'Script = {}')
+    load_string(state,'System = {}')
+    state.lenv.Script.ReloadScript = loader
+    state.lenv.System.ScanDirectory = scanner
+    state.lenv.SCANDIR_FILES = 1
+    state.lenv.SCANDIR_SUBDIRS = 2
 
-def run_scripts(lua):
-    lua.execute('OnInit()')
+def load_scripts(state):
+    load_script(state, 'Scripts/common.lua')
+    load_script(state, 'Scripts/main.lua')
+
+def run_scripts(state):
+    load_string(state,'OnInit()')
 
 def prepare_info(state,rdefn,path=None,tbl=None,seen=None):
     if seen is None:
         seen = {}
     if tbl is None:
-        tbl = state.lg
+        tbl = state.lenv
         seen[state.lstr(tbl)] = 'global-_G'
     todo = []
 
@@ -272,9 +291,21 @@ def prepare_info(state,rdefn,path=None,tbl=None,seen=None):
                             # TODO: also associate script origin for other types
                             # TODO: associate more script origin info
                             info = state.lgetinfo(v)
+                            line = info.linedefined
+                            last = info.lastlinedefined 
                             defn.orig.append(schema.ScriptOrigin(
-                                line = info.linedefined
+                                line = line,
+                                last = last
                                 ))
+                            file = info.source
+                            if file and file[0] == '@':
+                                file = file[1:]
+                                defn.orig.append(schema.FileOrigin(
+                                    file = file
+                                    ))
+                                args = interrogate_function(state,file,subpath,line,last)
+                                assert len(args) == 1 or len(set(args.values())) == 1
+                                defn.para = list(tuple(args.values())[0])
                     defn.orig.append(schema.GlobalOrigin(
                         path = subpath
                         ))
@@ -295,15 +326,9 @@ if __name__ == '__main__':
     loader = partial(load_script, state)
     scanner = partial(scan_directory, state)
     
-    state.lua.execute('Script = {}')
-    state.lua.execute('System = {}')
-    state.lg.Script.ReloadScript = loader
-    state.lg.System.ScanDirectory = scanner
-    state.lg.SCANDIR_FILES = 1
-    state.lg.SCANDIR_SUBDIRS = 2
-    
-    load_scripts(loader)
-    run_scripts(state.lua)
+    prepare_state(state)
+    load_scripts(state)
+    run_scripts(state)
 
     rdefn = schema.TableDefinition()
     rdefn.orig.append(schema.BuiltinOrigin(show=True))
