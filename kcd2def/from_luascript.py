@@ -279,7 +279,10 @@ def prepare_info(state,rdefn,path=None,tbl=None,seen=None):
                 fld.type = schema.PolyType()
                 rdefn.flds[k] = fld
             name = 'global-' + subpath
-            fld.type.many.add(schema.AliasType(name=name))
+            if t != 'table' and t != 'function':
+                fld.type.many.add(schema.LuaType(name=t))
+            else:
+                fld.type.many.add(schema.AliasType(name=name))
             if state.lstr(v) not in seen:
                 if t == 'table':
                     defn = schema.TableDefinition()
@@ -287,36 +290,34 @@ def prepare_info(state,rdefn,path=None,tbl=None,seen=None):
                     seen[state.lstr(v)] = name
                 elif t == 'function':
                     defn = schema.FunctionDefinition()
+            if defn is not None:
+                if state.lbuiltins[v]:
+                    defn.orig.append(schema.BuiltinOrigin())
                 else:
-                    fld.type.many.add(schema.LuaType(name=t))
-                if defn is not None:
-                    if state.lbuiltins[v]:
-                        defn.orig.append(schema.BuiltinOrigin())
-                    else:
-                        # TODO: associate file origin (currently muddled by lupa)
-                        if t == 'function':
-                            # TODO: also associate script origin for other types
-                            # TODO: associate more script origin info
-                            info = state.lgetinfo(v)
-                            line = info.linedefined
-                            last = info.lastlinedefined 
-                            defn.orig.append(schema.ScriptOrigin(
-                                line = line,
-                                last = last
+                    # TODO: associate file origin (currently muddled by lupa)
+                    if t == 'function':
+                        # TODO: also associate script origin for other types
+                        # TODO: associate more script origin info
+                        info = state.lgetinfo(v)
+                        line = info.linedefined
+                        last = info.lastlinedefined 
+                        defn.orig.append(schema.ScriptOrigin(
+                            line = line,
+                            last = last
+                            ))
+                        file = info.source
+                        if file and file[0] == '@':
+                            file = file[1:]
+                            defn.orig.append(schema.FileOrigin(
+                                file = file
                                 ))
-                            file = info.source
-                            if file and file[0] == '@':
-                                file = file[1:]
-                                defn.orig.append(schema.FileOrigin(
-                                    file = file
-                                    ))
-                                args = interrogate_function(state,file,subpath,line,last)
-                                assert len(args) == 1 or len(set(args.values())) == 1
-                                defn.args = list(map(lambda n: schema.Param(name=n),tuple(args.values())[0]))
-                    defn.orig.append(schema.GlobalOrigin(
-                        path = subpath
-                        ))
-                    state.root.defs[name] = defn
+                            args = interrogate_function(state,file,subpath,line,last)
+                            assert len(args) == 1 or len(set(args.values())) == 1
+                            defn.args = list(map(lambda n: schema.Param(name=n),tuple(args.values())[0]))
+                defn.orig.append(schema.GlobalOrigin(
+                    path = subpath
+                    ))
+                state.root.defs[name] = defn
     for d,k,v in todo:
         prepare_info(state,d,k,v,seen)
 
