@@ -10,6 +10,7 @@ import types
 
 
 __all__ = [
+    'RefuseMerge',
     'merge',
     'Record',
     'record',
@@ -21,8 +22,12 @@ __all__ = [
     'from_json',
 ]
 
-
 records: dict[str,type['Record']] = {}
+
+strict = False
+
+class RefuseMerge(Exception):
+    pass
 
 def record(cls):
     cls = dataclass(frozen = cls.pure(), kw_only=True)(cls)
@@ -50,15 +55,15 @@ class Record(DataClassJsonMixin):
 
     def join(self, other: 'Record') -> Optional['Record']:
         """combine the information of two similar records or fail"""
+        if not isinstance(other,Record):
+            raise TypeError(f'incompatible merge of {type(self).__name__} and {type(other).__name}.')
         # by default, only combine the same kind
         if self.kind != other.kind:
-            return None
+            raise RefuseMerge(f'incompatible merge of records {self.kind} and {other.kind}.')
         flds = {}
         for fld in fields(other):
             value = getattr(other,fld.name)
-            if hasattr(self,fld.name):
-                value = merge(getattr(self,fld.name),value)
-            flds[fld.name] = value
+            flds[fld.name] = merge(getattr(self,fld.name,None),value)
         return replace(self, **flds)
 
     @classmethod
@@ -74,45 +79,54 @@ def merge_pair(p):
     return merge(*p)
 
 def merge(a,b):
-    if a == b:
-        return b
-
     if a is None:
         return b
     if b is None:
         return a
-    
-    if isinstance(a,Record):
-        return a.join(b)
-    if isinstance(b,Record):
-        return b.join(a)
-    
-    if type(a) != type(b):
-        return None
 
-    if isinstance(a,set):
+    if isinstance(a,Record) and isinstance(b,Record):
+        return a.join(b)
+    
+    if isinstance(a,set) and isinstance(b,set):
         res = set()
         ret = set()
         for x in a:
             for y in b:
                 if y not in res:
-                    z = merge(x,y)
-                    if z is not None:
+                    add = False
+                    try:
+                        z = merge(x,y)
+                        add = True
+                    except RefuseMerge:
+                        pass
+                    if add:
                         x = z
                         res.add(y)
             ret.add(x)
         return ret | (res ^ b)
-    if isinstance(a,list):
+    
+    if isinstance(a,list) and isinstance(b,list):
         return list(map(merge_pair,zip_longest(a,b,fillvalue=None)))
-    if isinstance(a,dict):
-        ret = dict(a)
+    
+    if isinstance(a,dict) and isinstance(b,dict):
+        ret = dict()
         for k,v in b.items():
-            if k in a:
-                ret[k] = merge(ret[k],v)
-            ret[k] = v
+            ret[k] = merge(a.get(k,None),v)
         return ret
+
+    if type(a) != type(b):
+        raise RefuseMerge(f'incompatible merge of {type(a).__name__} and {type(b).__name__}.')
+
+    if a is False:
+        return b
+    if b is False:
+        return a
+
+    if strict and a != b:
+        raise ValueError(f'non-default value update from {a} to {b}.')
     
     return b
+
 
 ## Conversions
 

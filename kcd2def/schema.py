@@ -1,5 +1,5 @@
 from dataclasses import replace, field
-from record import record, Record, from_dict
+from record import RefuseMerge, record, Record, from_dict
 from collections.abc import Collection
 from typing import Literal, Optional, Union
 
@@ -66,6 +66,8 @@ class Definition(Record):
     orig: list[Origin] = field(default_factory=list)
     # has this been manually verified by a human?
     good: bool = False
+    # is this used by anything that runs in-game?
+    used: bool = False
     
     # silly way of making a set without hashability:
     def join(self, other):
@@ -92,7 +94,9 @@ class LuaType(Record):
     def pure(cls):
         return True
     def join(self, other):
-        return None
+        if self != other:
+            raise RefuseMerge('distinct element.')
+        return self
 
 @record
 class AliasType(Record):
@@ -101,7 +105,9 @@ class AliasType(Record):
     def pure(cls):
         return True
     def join(self, other):
-        return None
+        if self != other:
+            raise RefuseMerge('distinct element.')
+        return self
 
 Type = Union[AliasType,LuaType]
 
