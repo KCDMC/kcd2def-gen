@@ -296,20 +296,18 @@ def prepare_info(state,rdefn,path=None,tbl=None,seen=None):
                 else:
                     # TODO: associate file origin (currently muddled by lupa)
                     if t == 'function':
-                        # TODO: also associate script origin for other types
-                        # TODO: associate more script origin info
+                        # TODO: also associate file info for other types
+                        # TODO: associate more file info
                         info = state.lgetinfo(v)
                         line = info.linedefined
                         last = info.lastlinedefined 
-                        defn.orig.append(schema.ScriptOrigin(
-                            line = line,
-                            last = last
-                            ))
                         file = info.source
                         if file and file[0] == '@':
                             file = file[1:]
                             defn.orig.append(schema.FileOrigin(
-                                file = file
+                                file = file,
+                                line = line,
+                                last = last
                                 ))
                             args = interrogate_function(state,file,subpath,line,last)
                             assert len(args) == 1 or len(set(args.values())) == 1

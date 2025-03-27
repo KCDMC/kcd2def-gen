@@ -24,75 +24,95 @@ def type_union(t):
 def format_description(desc):
     return '\n'.join(map(desc.split('\n'),lambda s: '--\t' + s))
 
-def generate_def(name: str, defn: schema.Definition) -> str:
-    pass
-
 def generate_defs(root: schema.Root) -> dict[str,str]:
     defs = {}
     for name, defn in root.defs.items():
         lines = []
 
-        orig_g = None
-        orig_s = None
-        orig_f = None
-        orig_b = None
-        for o in defn.orig:
-            if isinstance(o,schema.GlobalOrigin):
-                orig_g = o
-            elif isinstance(o,schema.ScriptOrigin):
-                orig_s = o
-            elif isinstance(o,schema.FileOrigin):
-                orig_f = o
-            elif isinstance(o,schema.BuiltinOrigin):
-                orig_b = o
+        # extracting origins
+
+        orig_file = None
+        orig_global = None
+        orig_builtin = None
+        orig_coverage = None
         
-        match type(defn):
-            case schema.FunctionDefinition:
-                show = orig_b is None or orig_b.show
-                if show:
-                    if orig_g is not None:
-                        params = []
-                        for i,a in enumerate(defn.args):
-                            n,t,d = (a.name, a.type, a.desc)
-                            p_show = t is not None or d is not None
-                            if n is None:
-                                n = 'unk_'+str(i)
-                            if d is None:
-                                d = ''
-                            params.append(n)
-                            if p_show:
-                                lines.append(f'---@param {n} {type_union(t)} {d}')
-                        for i,r in enumerate(defn.rets):
-                            n,t,d = (r.name, r.type, r.desc)
-                            if t is None:
-                                t = 'unknown'
-                            #TODO: check, do multiple return lines work?
-                            lines.append(f'---@return {type_union(t)} {n} {d}')
-                        if orig_f is not None:
-                            lines.append(f'---@source {orig_f.file}')
-                        lines.append(f"function {orig_g.path}({', '.join(params)}) end")
-                    params = []
-                    for i,a in enumerate(defn.args):
-                        n,t,d = (a.name, a.type, a.desc)
-                        if n is None:
-                            n = 'unk_'+str(i)
-                        params.append(n if t is None else f"{n}: {type_union(t)}")
-                    #TODO: add return types
-                    lines.append(f"---@alias {NAMESPACE}*{name} fun({', '.join(params)})") 
-            case schema.ClassDefinition:
-                pass
-            case schema.TableDefinition:
-                lines.append(f"---@class {NAMESPACE}*{name}")
-                desc = defn.desc
-                if desc is not None:
-                    lines.append(format_description(desc))
-                for fldn,fld in defn.flds.items():
-                    desc = fld.desc
-                    if desc is None:
-                        desc = ''
-                    lines.append(f"---@field public {fldn} {type_union(fld.type)} {desc}")
-            case _:
-                raise ValueError('bare definition.')
+        for o in defn.orig:
+            if isinstance(o,schema.FileOrigin):
+                orig_file = o
+            elif isinstance(o,schema.GlobalOrigin):
+                orig_global = o
+            elif isinstance(o,schema.BuiltinOrigin):
+                orig_builtin = o
+            elif isinstance(o,schema.CoverageOrigin):
+                orig_coverage = o
+
+        show = orig_builtin is None or orig_builtin.show
+        if not show:
+            continue
+
+        # description section
+        lines.append('---')
+        
+        if defn.desc is not None:
+            lines.append(format_description(defn.desc))
+
+        if orig_coverage is not None:
+            lines.append('-- Dependencies:')
+            for k in orig_coverage.uses:
+                lines.append(f'---@see {k}')
+            lines.append('-- Dependants:')
+            for k in orig_coverage.used:
+                lines.append(f'---@see {k}')
+
+        lines.append('---')
+
+        # body section
+        
+        if isinstance(defn,schema.FunctionDefinition):
+            
+            if orig_global is not None:
+                params = []
+                for i,a in enumerate(defn.args):
+                    n,t,d = (a.name, a.type, a.desc)
+                    p_show = t is not None or d is not None
+                    if n is None:
+                        n = 'unk_'+str(i)
+                    if d is None:
+                        d = ''
+                    params.append(n)
+                    if p_show:
+                        lines.append(f'---@param {n} {type_union(t)} {d}')
+                for i,r in enumerate(defn.rets):
+                    n,t,d = (r.name, r.type, r.desc)
+                    if t is None:
+                        t = 'unknown'
+                    #TODO: check, do multiple return lines work?
+                    lines.append(f'---@return {type_union(t)} {n} {d}')
+                if orig_file is not None:
+                    lines.append(f'---@source {orig_file.file}')
+                lines.append(f"function {orig_global.path}({', '.join(params)}) end")
+            params = []
+            for i,a in enumerate(defn.args):
+                n,t,d = (a.name, a.type, a.desc)
+                if n is None:
+                    n = 'unk_'+str(i)
+                params.append(n if t is None else f"{n}: {type_union(t)}")
+            #TODO: add return types
+            lines.append(f"---@alias {NAMESPACE}*{name} fun({', '.join(params)})")
+            
+        elif isinstance(defn, schema.TableDefinition):
+            header = f"---@class {NAMESPACE}*{name}"
+            if defn.meta is not None:
+                header = header + ': ' + defn.meta
+            lines.append(header)
+            #TODO: handle operators (infer from meta, include overrides, special cases for call and index)
+            for fldn,fld in defn.flds.items():
+                desc = fld.desc
+                if desc is None:
+                    desc = ''
+                visibility = 'public' if fld.good else 'private'
+                lines.append(f"---@field {visibility} {fldn} {type_union(fld.type)} {desc}")
+        
         if lines:
             defs[name] = '\n'.join(lines)+'\n'
     

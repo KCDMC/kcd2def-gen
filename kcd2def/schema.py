@@ -11,6 +11,11 @@ __all__ = [
     'BuiltinType',
     'PresentType',
     'ReferenceType',
+
+    'MetaOperator',
+    'PlainOperator',
+    'ProxyOperator',
+    'BuiltinOperator',
     
     'Origin',
     'Definition',
@@ -25,16 +30,15 @@ __all__ = [
 
     'FileOrigin',
     'GlobalOrigin',
-    'ScriptOrigin',
     'BuiltinOrigin',
+    'CoverageOrigin',
 
-    'ClassDefinition',
     'TableDefinition',
     'FunctionDefinition',
 ]
 
 
-## Types
+## Special Strings
 
 NilType = Literal['nil']
 ValueType = Literal['boolean','number','string','integer','lightuserdata']
@@ -44,34 +48,41 @@ ReferenceType = Union[TableType,ChunkType]
 PresentType = Union[ValueType, ReferenceType]
 BuiltinType = Union[NilType, PresentType]
 
+# metamethods assuming lua 5.1
+MetaOperator = Literal['mode','tostring','gc','name','metatable']
+PlainOperator = Literal['unm','add','sub','mul','div','mod','pow','concat','eq','lt','le']
+ProxyOperator = Literal['call','index','newindex']
+BuiltinOperator = Union[MetaOperator,PlainOperator,ProxyOperator]
+
 
 ## Records
 
 @record
-class Relation(Record):
-    pass
-
-@record
 class Origin(Record):
-    pass
+    """source information of a lua definition"""
 
 @record
 class Definition(Record):
     """a lua definition entry"""
-    # formatted description
-    desc: Optional[str] = None
-    # formatted usage examples
-    uses: Optional[str] = None
-    # sources of the definition
-    orig: list[Origin] = field(default_factory=list)
+
     # has this been manually verified by a human?
     good: bool = False
-    # is this used by anything that runs in-game?
-    used: bool = False
     
-    # silly way of making a set without hashability:
+    # formatted description
+    desc: Optional[str] = None
+    
+    # formatted usage examples
+    exam: Optional[str] = None
+    
+    # sources of the definition
+    orig: list[Origin] = field(default_factory=list)
+
+    # --------------------------------------------
+    
     def join(self, other):
         result = super().join(other)
+
+        # silly way of making a set without hashability:
         orig_by_type = {}
         for o in self.orig:
             t = type(o)
@@ -81,7 +92,10 @@ class Definition(Record):
             else:
                 ot = ot.join(o)
             orig_by_type[t] = ot
-        return replace(result,orig=list(orig_by_type.values()))
+        orig=list(orig_by_type.values())
+        
+        return replace(result,orig=orig)
+    
     @classmethod
     def make(cls,kvs,infer_missing = False):
         result = cls.from_dict(kvs,infer_missing = infer_missing)
@@ -122,6 +136,7 @@ class PolyType(Record):
 
 @record
 class Field(Record):
+    good: bool = False
     type: Optional[PolyType] = None
     desc: Optional[str] = None
 
@@ -132,47 +147,63 @@ class Param(Field):
 ## Origins
 
 @record
+class FileOrigin(Origin):
+    # URI to file that defines this
+    file: str
+    # line defined
+    line: Optional[int] = None
+    # last line defined
+    last: Optional[int] = None
+    # initiating character (offset within line defined)
+    init: Optional[int] = None
+    # terminating character (offset within last line defined)
+    term: Optional[int] = None
+
+
+@record
 class GlobalOrigin(Origin):
-    """accessible under a fixed global path"""
+    #fixed global path in lua environment of game
     path: Union[str,list]
 
 @record
-class FileOrigin(Origin):
-    """the location of the file (in game-specific notation)"""
-    file: str
-
-@record
 class BuiltinOrigin(Origin):
+    # is this builtin worth showing (e.g. it got modified by the game)
     show: bool = False
 
 @record
-class ScriptOrigin(Origin):
-    # line defined
-    line: int
-    # last line defined
-    last: Optional[int] = None
-    # initiating character
-    init: Optional[int] = None
-    # terminating character
-    term: Optional[int] = None
+class CoverageOrigin(Origin):
+    # is this actually used in-game? (i.e. non-legacy)
+    real: bool = False
+    
+    # other definitions that use this
+    used: set[str] = field(default_factory=set)
+
+    # other definitions this uses
+    uses: set[str] = field(default_factory=set)
+
+    @classmethod
+    def make(cls,kvs,infer_missing = False):
+        result = cls.from_dict(kvs,infer_missing = infer_missing)
+        used = set(result.used)
+        deps = set(result.deps)
+        return replace(result,used = used,deps = deps)
 
 
 ## Definitions
 
 @record
 class TableDefinition(Definition):
+    # fields
     flds: dict[str,Field] = field(default_factory=dict)
+    # metatable
     meta: Optional[Type] = None
-
-@record
-class ClassDefinition(TableDefinition):
-    call: Optional[PolyType] = None
+    # override operator overloads
+    over: dict[BuiltinOperator,str] = field(default_factory=dict)
 
 @record
 class FunctionDefinition(Definition):
     args: list[Param] = field(default_factory=list)
     rets: list[Param] = field(default_factory=list)
-    call: Optional[PolyType] = None
 
 
 ## Structure
