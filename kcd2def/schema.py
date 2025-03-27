@@ -202,8 +202,8 @@ class TableDefinition(Definition):
 
 @record
 class FunctionDefinition(Definition):
-    args: list[Param] = field(default_factory=list)
-    rets: list[Param] = field(default_factory=list)
+    args: Optional[list[Param]] = None
+    rets: Optional[list[Param]] = None
 
 
 ## Structure

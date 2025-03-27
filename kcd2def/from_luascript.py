@@ -13,9 +13,7 @@ import lupa.lua51 as lupa
 
 SCRIPTS_FOLDER_PATH = Path("..")
 
-@dataclass
-class NodeInfo:
-    scope: bool = False # True -> inside a function
+VALID_FIELD = re.compile(r'^[A-Za-z_][A-Za-z0-9_]+$')
 
 @dataclass
 class State:
@@ -53,6 +51,7 @@ class State:
         _lgetinfo = _lglobals.debug.getinfo
 
         _lenv = lua.execute("""
+            python = nil
             __luascript_env = {}
             return __luascript_env
             
@@ -63,15 +62,15 @@ class State:
 
             local function scan(tbl)
                 local todo = {}
-                if builtins[tbl] then return end
+                if builtins[tostring(tbl)] then return end
                 local b = {}
-                builtins[tbl] = b
+                builtins[tostring(tbl)] = b
                 for k,v in pairs(tbl) do
                     if type(v) == 'table' then
                         todo[v] = true
                     end
                     if type(v) == 'function' then
-                        builtins[v] = tbl
+                        builtins[tostring(v)] = tbl
                     end
                     b[k] = true
                 end
@@ -249,6 +248,12 @@ def prepare_state(state):
     state.lenv.SCANDIR_FILES = 1
     state.lenv.SCANDIR_SUBDIRS = 2
 
+def unprepare_state(state):
+    state.lenv.Script = None
+    state.lenv.System = None
+    state.lenv.SCANDIR_FILES = None
+    state.lenv.SCANDIR_SUBDIRS = None
+
 def load_scripts(state):
     load_script(state, 'Scripts/common.lua')
     load_script(state, 'Scripts/main.lua')
@@ -265,7 +270,7 @@ def prepare_info(state,rdefn,path=None,tbl=None,seen=None):
     todo = []
 
     for k,v in tbl.items():
-        if state.ltype(k) == 'string':
+        if state.ltype(k) == 'string' and VALID_FIELD.match(k):
             t = state.ltype(v)
             subpath = k
             defn = None
@@ -291,9 +296,20 @@ def prepare_info(state,rdefn,path=None,tbl=None,seen=None):
                 elif t == 'function':
                     defn = schema.FunctionDefinition()
             if defn is not None:
-                if state.lbuiltins[v]:
-                    defn.orig.append(schema.BuiltinOrigin())
+                if state.lbuiltins[state.lstr(v)]:
+                    # no idea why this hack is needed
+                    # but some non-builtins seem to get considered builtins
+                    # so to double check they are actually builtin:
+                    ##print(f"testing {subpath}")
+                    test = state.lua.execute(f"return pcall(function() return {subpath} end)")
+                    ##print(test)
+                    ##print(load_string(state,f"return {subpath}"))
+                    if test[0] and test[1]:
+                        defn.orig.append(schema.BuiltinOrigin())
                 else:
+                    for o in rdefn.orig:
+                        if isinstance(o,schema.BuiltinOrigin):
+                            o.show = True
                     # TODO: associate file origin (currently muddled by lupa)
                     if t == 'function':
                         # TODO: also associate file info for other types
@@ -331,10 +347,11 @@ if __name__ == '__main__':
     
     loader = partial(load_script, state)
     scanner = partial(scan_directory, state)
-    
+
     prepare_state(state)
     load_scripts(state)
     run_scripts(state)
+    unprepare_state(state)
 
     rdefn = schema.TableDefinition()
     rdefn.orig.append(schema.BuiltinOrigin(show=True))
