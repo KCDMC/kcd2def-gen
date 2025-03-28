@@ -230,15 +230,16 @@ def generate_defs(root: schema.Root) -> dict[str,str]:
             lines.append(header)
             #TODO: handle operators (infer from meta, include overrides, special cases for call and index)
             for fldn,fld in defn.flds.items():
-                try:
-                    types = type_union(fld.type,builtins,shown,name in BUILTINS_REDIRECT)
-                except BuiltinTypeException:
-                    continue
-                desc = fld.desc
-                if desc is None:
-                    desc = ''
-                visibility = 'public' if fld.good else 'private'
-                lines.append(f"---@field {visibility} {fldn} {types} {desc}")
+                if fld.show:
+                    try:
+                        types = type_union(fld.type,builtins,shown,name in BUILTINS_REDIRECT)
+                    except BuiltinTypeException:
+                        continue
+                    desc = fld.desc
+                    if desc is None:
+                        desc = ''
+                    visibility = 'public' if fld.good else 'private'
+                    lines.append(f"---@field {visibility} {fldn} {types} {desc}")
             if orig_global is not None:
                 if not defn.good:
                     lines.append('---@deprecated')

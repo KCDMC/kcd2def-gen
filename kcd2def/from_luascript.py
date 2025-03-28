@@ -70,7 +70,7 @@ class State:
                         todo[v] = true
                     end
                     if type(v) == 'function' then
-                        builtins[tostring(v)] = tbl
+                        builtins[tostring(v)] = true
                     end
                     b[k] = true
                 end
@@ -273,6 +273,8 @@ def prepare_info(state,rdefn,path=None,tbl=None,seen=None):
         tbl = state.lenv
         seen[state.lstr(tbl)] = 'global-_G'
     todo = []
+    
+    builtins = state.lbuiltins[state.lstr(tbl)]
 
     for k,v in tbl.items():
         if state.ltype(k) == 'string' and VALID_FIELD.match(k):
@@ -287,6 +289,8 @@ def prepare_info(state,rdefn,path=None,tbl=None,seen=None):
             if fld is None:
                 fld = schema.Field()
                 fld.type = schema.PolyType()
+                if builtins is not None:
+                    fld.show = not builtins[k]
                 rdefn.flds[k] = fld
             name = 'global-' + subpath
             if t != 'table' and t != 'function':
@@ -311,6 +315,8 @@ def prepare_info(state,rdefn,path=None,tbl=None,seen=None):
                     ##print(load_string(state,f"return {subpath}"))
                     if test[0] and test[1]:
                         defn.orig.append(schema.BuiltinOrigin())
+                    else:
+                        state.lbuiltins[state.lstr(v)] = False
                 else:
                     for o in rdefn.orig:
                         if isinstance(o,schema.BuiltinOrigin):

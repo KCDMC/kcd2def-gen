@@ -136,9 +136,10 @@ class PolyType(Record):
 
 @record
 class Field(Record):
-    good: bool = False
     type: Optional[PolyType] = None
     desc: Optional[str] = None
+    good: bool = False
+    show: bool = True
 
 @record
 class Param(Field):
@@ -210,4 +211,7 @@ class FunctionDefinition(Definition):
 
 @record
 class Root(Record):
+    # collected definitions
     defs: dict[str,Definition] = field(default_factory=dict)
+    # remapped definition names
+    maps: dict[str,str] = field(default_factory=dict)
