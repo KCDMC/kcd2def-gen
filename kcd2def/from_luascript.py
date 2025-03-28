@@ -6,12 +6,14 @@ from os import scandir, chdir
 from functools import partial
 from contextlib import redirect_stdout
 from dataclasses import dataclass
+import time
 import re
 
 from luaparser import ast, astnodes
 import lupa.lua51 as lupa
 
-SCRIPTS_FOLDER_PATH = Path("..")
+INPUT_FOLDER_PATH = Path("sources")
+OUTPUT_FOLDER_PATH = Path("entries")
 
 VALID_FIELD = re.compile(r'^[A-Za-z_][A-Za-z0-9_]+$')
 
@@ -32,8 +34,6 @@ class State:
     lbuiltins: 'lupa._LuaTable'
     lenv: 'lupa._LuaTable'
     
-    root_path: Path
-
     current_file_path: str | None = None
 
     @classmethod
@@ -169,7 +169,7 @@ def load_string(state, data):
 
 def load_script(state, path):
     if isinstance(path, Path):
-        path = str(path.relative_to(state.root_path).as_posix())
+        path = str(path.as_posix())
 
     path = 'Scripts/' + path
     if reject_path(path):
@@ -194,6 +194,8 @@ def load_script(state, path):
     """)
 
 def scan_directory(state, path, mode):
+    if isinstance(path, Path):
+        path = str(path.as_posix())
     
     found = state.lua.eval('{}')
     if reject_path(path):
@@ -241,6 +243,9 @@ def reject_path(path):
     return False
 
 def prepare_state(state):
+    loader = partial(load_script, state)
+    scanner = partial(scan_directory, state)
+    
     load_string(state,'Script = {}')
     load_string(state,'System = {}')
     state.lenv.Script.ReloadScript = loader
@@ -339,15 +344,14 @@ def dump_info(state, file):
     with open(file,'w') as file:
         file.write(into_json(state.root))
 
-if __name__ == '__main__':
-    chdir(SCRIPTS_FOLDER_PATH)
+def main(argv):
+    this = Path(argv[0])
+    chdir(this.parent)
     
-    global state
-    state = State.init(root_path=Path('.'))
+    output_folder = OUTPUT_FOLDER_PATH.absolute()
+    chdir(INPUT_FOLDER_PATH)
     
-    loader = partial(load_script, state)
-    scanner = partial(scan_directory, state)
-
+    state = State.init()
     prepare_state(state)
     load_scripts(state)
     run_scripts(state)
@@ -358,4 +362,12 @@ if __name__ == '__main__':
     rdefn.orig.append(schema.GlobalOrigin(path='_G'))
     state.root.defs['global-_G'] = rdefn
     prepare_info(state,rdefn)
-    dump_info(state, "test.json")
+
+    timestamp = time.strftime("%Y-%m-%d--%H-%M-%S")
+    output_file_name = f"{this.stem}-{timestamp}.json"
+    output_folder.mkdir(parents=True, exist_ok=True)
+    dump_info(state, output_folder / output_file_name)
+
+if __name__ == '__main__':
+    import sys
+    main(sys.argv)

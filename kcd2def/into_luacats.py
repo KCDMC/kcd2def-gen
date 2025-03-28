@@ -1,6 +1,11 @@
 import schema
 from record import from_json
 from itertools import zip_longest
+from pathlib import Path
+from os import scandir, chdir
+
+INPUT_FOLDER_PATH = Path("entries")
+OUTPUT_FOLDER_PATH = Path("results")
 
 NAMESPACE = 'kcd2def'
 
@@ -289,5 +294,20 @@ def process_file(read_path,write_path):
         file.write('---@diagnostic disable: deprecated, invisible\n\n')
         file.write('\n'.join(defs.values()))
 
+def main(argv):
+    this = Path(argv[0])
+    chdir(this.parent)
+    
+    inputs = []
+    for entry in scandir(INPUT_FOLDER_PATH):
+        path = Path(entry)
+        if path.is_file() and path.suffix == '.json':
+            inputs.append(path)
+    
+    OUTPUT_FOLDER_PATH.mkdir(parents=True,exist_ok=True)
+    for path in inputs:
+        process_file(path,OUTPUT_FOLDER_PATH / (path.stem + '.lua'))
+
 if __name__ == '__main__':
-    process_file('../test.json','../test.lua')    
+    import sys
+    main(sys.argv)

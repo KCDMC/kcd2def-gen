@@ -4,7 +4,8 @@ from pathlib import Path
 from argparse import ArgumentParser
 from os import chdir
 
-DEFAULT_OUTPUT = '../merged.json'
+DEFAULT_OUTPUT_FOLDER_PATH = Path("entries")
+DEFAULT_OUTPUT_FILE_NAME = 'merged'
 
 def merge_files(files,output):
     data = []
@@ -27,14 +28,23 @@ def merge_files(files,output):
 def main_parser():
     parser = ArgumentParser()
     parser.add_argument('this')
-    parser.add_argument('-o','--output',default=DEFAULT_OUTPUT)
+    parser.add_argument('-o','--output',default=None)
     parser.add_argument('files',nargs='+')
     return parser
 
 def main(argv):
     args = main_parser().parse_args(argv)
     chdir(Path(args.this).parent)
-    merge_files(args.files,args.output)
+    output_file = args.output
+    if output_file is None:
+        import time
+        timestamp = time.strftime("%Y-%m-%d--%H-%M-%S")
+        output_file_name = f"{DEFAULT_OUTPUT_FILE_NAME}_{timestamp}.json"
+        output_file = DEFAULT_OUTPUT_FOLDER_PATH / output_file_name
+    else:
+        output_file = Path(output_file)
+    output_file.parent.mkdir(parents=True,exist_ok=True)
+    merge_files(args.files,output_file)
 
 if __name__ == '__main__':
     from sys import argv
