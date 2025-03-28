@@ -10,6 +10,7 @@ OUTPUT_FOLDER_PATH = Path("results")
 NAMESPACE = 'kcd2def'
 
 BUILTINS_REDIRECT = {
+    'global-_G': '_G',
     'global-os': 'oslib',
     'global-io': 'iolib',
     'global-debug': 'debuglib',
@@ -49,8 +50,6 @@ BUILTINS_DEFINE = {
     'global-newproxy': "fun(proxy: boolean|table|userdata): userdata",
     'global-dofile': "fun(filename?: string): ...: any",
     'global-error': "fun(message: any, level?: integer)",
-    
-    
 }
 
 BUILTINS_DEFINE_GENERICS = {
@@ -67,7 +66,10 @@ BUILTINS_DEFINE_INTERNAL = {
     'global-pairs': [ f"---@alias {NAMESPACE}*internal-global-pairs fun(table: table<K, V>, index?: K): K, V" ],
 }
 
-def type_union(t,builtins,shown):
+class BuiltinTypeException(Exception):
+    pass
+
+def type_union(t,builtins,shown,exclude_builtins=False):
     if t is None:
         return 'unknown'
     ts = t.many
@@ -75,8 +77,9 @@ def type_union(t,builtins,shown):
     for v in ts:
         tn = v.name
         if isinstance(v,schema.AliasType):
-            shown.add(tn)
             if tn in builtins:
+                if exclude_builtins:
+                    raise BuiltinTypeException()
                 if tn in BUILTINS_REDIRECT:
                     tn = BUILTINS_REDIRECT[tn]
                 elif tn in BUILTINS_DEFINE:
@@ -85,6 +88,7 @@ def type_union(t,builtins,shown):
                     tn = 'function'
             else:
                 tn = f"{NAMESPACE}*{tn}"
+            shown.add(tn)
         if t is None:
             t = tn
         else:
@@ -100,11 +104,6 @@ def expand_path(path):
         pass
     return path
 
-def is_singleton_path(path):
-    if isinstance(path,list):
-        return len(path) == 1
-    return path.count('.') == 1
-
 def format_description(desc):
     return '\n'.join(map(desc.split('\n'),lambda s: '--\t' + s))
 
@@ -118,7 +117,7 @@ def generate_defs(root: schema.Root) -> dict[str,str]:
                 orig_builtin = o
             elif isinstance(o,schema.GlobalOrigin):
                 orig_global = o
-        show = orig_global is None or is_singleton_path(orig_global.path) or orig_builtin is None or orig_builtin.show
+        show = orig_builtin is None or orig_builtin.show
         if show:
             continue
         builtins[name] = defn
@@ -223,16 +222,23 @@ def generate_defs(root: schema.Root) -> dict[str,str]:
             
         elif isinstance(defn, schema.TableDefinition):
             header = f"---@class {NAMESPACE}*{name}"
-            if defn.meta is not None:
-                header = header + ': ' + defn.meta
+            meta = defn.meta
+            if meta is None:
+                meta = BUILTINS_REDIRECT.get(name,None)
+            if meta is not None:
+                header = header + ': ' + meta
             lines.append(header)
             #TODO: handle operators (infer from meta, include overrides, special cases for call and index)
             for fldn,fld in defn.flds.items():
+                try:
+                    types = type_union(fld.type,builtins,shown,name in BUILTINS_REDIRECT)
+                except BuiltinTypeException:
+                    continue
                 desc = fld.desc
                 if desc is None:
                     desc = ''
                 visibility = 'public' if fld.good else 'private'
-                lines.append(f"---@field {visibility} {fldn} {type_union(fld.type,builtins,shown)} {desc}")
+                lines.append(f"---@field {visibility} {fldn} {types} {desc}")
             if orig_global is not None:
                 if not defn.good:
                     lines.append('---@deprecated')
