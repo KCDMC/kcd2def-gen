@@ -38,7 +38,7 @@ class State:
 
     @classmethod
     def init(cls,*args,**kwargs):
-        defs = schema.Root()
+        root = schema.Root()
         files = {}
         
         lua = lupa.LuaRuntime(unpack_returned_tuples=True)
@@ -94,7 +94,7 @@ class State:
             return builtins
         """)
         
-        return cls(defs, files, lua,
+        return cls(root, files, lua,
                    _lglobals, _ltype, _lstr, _lloadfile, _lloadstring,
                    _lsetfenv, _lgetinfo, _lbuiltins, _lenv,
                    *args, **kwargs)
