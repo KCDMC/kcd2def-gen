@@ -72,30 +72,35 @@ class BuiltinTypeException(Exception):
 def type_union(t,builtins,shown,exclude_builtins=False):
     if t is None:
         return 'unknown'
-    ts = t.many
-    t = None
-    for v in ts:
-        tn = v.name
-        if isinstance(v,schema.AliasType):
-            if tn in builtins:
-                if exclude_builtins:
-                    raise BuiltinTypeException()
-                if tn in BUILTINS_REDIRECT:
-                    tn = BUILTINS_REDIRECT[tn]
-                elif tn in BUILTINS_DEFINE:
-                    tn = f"{NAMESPACE}*{tn}"
-                else:
-                    tn = 'function'
-            else:
-                tn = f"{NAMESPACE}*{tn}"
-            shown.add(tn)
-        if t is None:
-            t = tn
+    tu = None
+    
+    for tn in t.bset:
+        if tu is None:
+            tu = tn
         else:
-            t = f"{t}|{tn}"
-    if t is None:
-        t = 'unknown'
-    return t
+            tu = f"{t}|{tn}"
+
+    for tn in t.dset:
+        if tn in builtins:
+            if exclude_builtins:
+                raise BuiltinTypeException()
+            if tn in BUILTINS_REDIRECT:
+                tn = BUILTINS_REDIRECT[tn]
+            elif tn in BUILTINS_DEFINE:
+                tn = f"{NAMESPACE}*{tn}"
+            else:
+                tn = 'function'
+        else:
+            tn = f"{NAMESPACE}*{tn}"
+        shown.add(tn)
+        if tu is None:
+            tu = tn
+        else:
+            tu = f"{t}|{tn}"
+    
+    if tu is None:
+        tu = 'unknown'
+    return tu
 
 def expand_path(path):
     #TODO: check for field name conflicts and turn to list if so
@@ -183,8 +188,6 @@ def generate_defs(root: schema.Root) -> dict[str,str]:
             if defn.rets is not None:
                 for i,r in enumerate(defn.rets):
                     n,t,d = (r.name, r.type, r.desc)
-                    if t is None:
-                        t = 'unknown'
                     #TODO: check, do multiple return lines work?
                     lines.append(f'---@return {type_union(t,builtins,shown)} {n} {d}')
             if orig_file is not None:

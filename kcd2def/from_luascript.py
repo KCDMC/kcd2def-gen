@@ -15,7 +15,7 @@ import lupa.lua51 as lupa
 INPUT_FOLDER_PATH = Path("sources")
 OUTPUT_FOLDER_PATH = Path("entries")
 
-VALID_FIELD = re.compile(r'^[A-Za-z_][A-Za-z0-9_]+$')
+VALID_FIELD = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
 
 @dataclass
 class State:
@@ -234,7 +234,7 @@ def scan_directory(state, path, mode):
     return found
 
 reject_paths = {'Scripts/Quests/'}
-reject_global_paths = {'package.loaded'}
+reject_global_paths = {'package.loaded','package.loaders'}
 
 def reject_path(path):
     for subpath in reject_paths:
@@ -267,6 +267,7 @@ def run_scripts(state):
     load_string(state,'OnInit()')
 
 def prepare_info(state,rdefn,path=None,tbl=None,seen=None):
+    
     if seen is None:
         seen = {}
     if tbl is None:
@@ -277,72 +278,84 @@ def prepare_info(state,rdefn,path=None,tbl=None,seen=None):
     builtins = state.lbuiltins[state.lstr(tbl)]
 
     for k,v in tbl.items():
-        if state.ltype(k) == 'string' and VALID_FIELD.match(k):
-            t = state.ltype(v)
-            subpath = k
-            defn = None
-            if path is not None:
-                subpath = path + '.' + k
-            if subpath in reject_global_paths:
-                continue
-            fld = rdefn.flds.get(k,None)
-            if fld is None:
-                fld = schema.Field()
-                fld.type = schema.PolyType()
-                if builtins is not None:
-                    fld.show = not builtins[k]
-                rdefn.flds[k] = fld
-            name = 'global-' + subpath
-            if t != 'table' and t != 'function':
-                fld.type.many.add(schema.LuaType(name=t))
-            else:
-                fld.type.many.add(schema.AliasType(name=name))
-            if state.lstr(v) not in seen:
-                if t == 'table':
-                    defn = schema.TableDefinition()
-                    todo.append((defn,subpath,v))
-                    seen[state.lstr(v)] = name
-                elif t == 'function':
-                    defn = schema.FunctionDefinition()
-            if defn is not None:
-                if state.lbuiltins[state.lstr(v)]:
-                    # no idea why this hack is needed
-                    # but some non-builtins seem to get considered builtins
-                    # so to double check they are actually builtin:
-                    ##print(f"testing {subpath}")
-                    test = state.lua.execute(f"return pcall(function() return {subpath} end)")
-                    ##print(test)
-                    ##print(load_string(state,f"return {subpath}"))
-                    if test[0] and test[1]:
-                        defn.orig.append(schema.BuiltinOrigin())
-                    else:
-                        state.lbuiltins[state.lstr(v)] = False
+        
+        raw = False
+        if state.ltype(k) != 'string' or not VALID_FIELD.match(k):
+            raw = True
+            k = f'[{k}]'
+            
+        t = state.ltype(v)
+        subpath = k
+        defn = None
+        if path is not None:
+            subpath = path + '.' + k
+        if subpath in reject_global_paths:
+            continue
+        
+        fld = rdefn.flds.get(k,None)
+        if fld is None:
+            fld = schema.Field()
+            fld.type = schema.Type()
+            if builtins is not None:
+                fld.show = not builtins[k]
+            rdefn.flds[k] = fld
+
+        if raw:
+            fld.type.bset.add(t)
+            continue
+            
+        name = 'global-' + subpath
+        if t != 'table' and t != 'function':
+            fld.type.bset.add(t)
+        else:
+            fld.type.dset.add(name)
+        if state.lstr(v) not in seen:
+            if t == 'table':
+                defn = schema.TableDefinition()
+                todo.append((defn,subpath,v))
+                seen[state.lstr(v)] = name
+            elif t == 'function':
+                defn = schema.FunctionDefinition()
+                
+        if defn is not None:
+            if state.lbuiltins[state.lstr(v)]:
+                # no idea why this hack is needed
+                # but some non-builtins seem to get considered builtins
+                # so to double check they are actually builtin:
+                ##print(f"testing {subpath}")
+                test = state.lua.execute(f"return pcall(function() return {subpath} end)")
+                ##print(test)
+                ##print(load_string(state,f"return {subpath}"))
+                if test[0] and test[1]:
+                    defn.orig.append(schema.BuiltinOrigin())
                 else:
-                    for o in rdefn.orig:
-                        if isinstance(o,schema.BuiltinOrigin):
-                            o.show = True
-                    # TODO: associate file origin (currently muddled by lupa)
-                    if t == 'function':
-                        # TODO: also associate file info for other types
-                        # TODO: associate more file info
-                        info = state.lgetinfo(v)
-                        line = info.linedefined
-                        last = info.lastlinedefined 
-                        file = info.source
-                        if file and file[0] == '@':
-                            file = file[1:]
-                            defn.orig.append(schema.FileOrigin(
-                                file = file,
-                                line = line,
-                                last = last
-                                ))
-                            args = interrogate_function(state,file,subpath,line,last)
-                            assert len(args) == 1 or len(set(args.values())) == 1
-                            defn.args = list(map(lambda n: schema.Param(name=n),tuple(args.values())[0]))
-                defn.orig.append(schema.GlobalOrigin(
-                    path = subpath
-                    ))
-                state.root.defs[name] = defn
+                    state.lbuiltins[state.lstr(v)] = False
+            else:
+                for o in rdefn.orig:
+                    if isinstance(o,schema.BuiltinOrigin):
+                        o.show = True
+                if t == 'function':
+                    # TODO: also associate file info for other types
+                    # TODO: associate more file info
+                    info = state.lgetinfo(v)
+                    line = info.linedefined
+                    last = info.lastlinedefined 
+                    file = info.source
+                    if file and file[0] == '@':
+                        file = file[1:]
+                        defn.orig.append(schema.FileOrigin(
+                            file = file,
+                            line = line,
+                            last = last
+                            ))
+                        args = interrogate_function(state,file,subpath,line,last)
+                        assert len(args) == 1 or len(set(args.values())) == 1
+                        defn.args = list(map(lambda n: schema.Param(name=n),tuple(args.values())[0]))
+            defn.orig.append(schema.GlobalOrigin(
+                path = subpath
+                ))
+            state.root.defs[name] = defn
+            
     for d,k,v in todo:
         prepare_info(state,d,k,v,seen)
 

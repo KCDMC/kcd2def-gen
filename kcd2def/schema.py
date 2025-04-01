@@ -1,5 +1,5 @@
 from dataclasses import replace, field
-from record import RefuseMerge, record, Record, from_dict
+from record import record, Record, from_dict
 from collections.abc import Collection
 from typing import Literal, Optional, Union
 
@@ -20,11 +20,7 @@ __all__ = [
     'Origin',
     'Definition',
 
-    'LuaType'
-    'AliasType',
-    'PolyType',
     'Type',
-
     'Field',
     'Param',
 
@@ -64,20 +60,14 @@ class Origin(Record):
 @record
 class Definition(Record):
     """a lua definition entry"""
-
     # has this been manually verified by a human?
     good: bool = False
-    
     # formatted description
     desc: Optional[str] = None
-    
     # formatted usage examples
     exam: Optional[str] = None
-    
     # sources of the definition
     orig: list[Origin] = field(default_factory=list)
-
-    # --------------------------------------------
     
     def join(self, other):
         result = super().join(other)
@@ -97,53 +87,44 @@ class Definition(Record):
         return replace(result,orig=orig)
     
     @classmethod
-    def make(cls,kvs,infer_missing = False):
-        result = cls.from_dict(kvs,infer_missing = infer_missing)
+    def make(cls,kvs):
+        result = cls.from_dict(kvs,infer_missing = True)
         return result.join(result)
 
 @record
-class LuaType(Record):
-    name: BuiltinType
+class Type(Record):
+    bset: set[BuiltinType] = field(default_factory=set)
+    dset: set[str] = field(default_factory=set)
+    
     @classmethod
-    def pure(cls):
-        return True
-    def join(self, other):
-        if self != other:
-            raise RefuseMerge('distinct element.')
-        return self
+    def make(cls,kvs) -> 'Type':
+        rec = cls.from_dict(kvs,infer_missing = True)
+        bset = set(map(from_dict,rec.bset))
+        dset = set(map(from_dict,rec.dset))
+        return replace(rec,bset=bset,dset=dset)
 
-@record
-class AliasType(Record):
-    name: str
     @classmethod
-    def pure(cls):
-        return True
-    def join(self, other):
-        if self != other:
-            raise RefuseMerge('distinct element.')
-        return self
-
-Type = Union[AliasType,LuaType]
-
-@record
-class PolyType(Record):
-    many: set[Type] = field(default_factory=set)
-    @classmethod
-    def make(cls,kvs,infer_missing = False) -> 'PolyType':
-        rec = cls.from_dict(kvs,infer_missing = infer_missing)
-        many = set(map(from_dict,rec.many))
-        return replace(rec,many=many)
+    def poly(cls):
+        return False
 
 @record
 class Field(Record):
-    type: Optional[PolyType] = None
+    type: Optional[Type] = None
     desc: Optional[str] = None
     good: bool = False
     show: bool = True
 
+    @classmethod
+    def poly(cls):
+        return False
+
 @record
 class Param(Field):
     name: Optional[str] = None
+    
+    @classmethod
+    def poly(cls):
+        return False
 
 ## Origins
 
@@ -175,16 +156,14 @@ class BuiltinOrigin(Origin):
 class CoverageOrigin(Origin):
     # is this actually used in-game? (i.e. non-legacy)
     real: bool = False
-    
     # other definitions that use this
     used: set[str] = field(default_factory=set)
-
     # other definitions this uses
     uses: set[str] = field(default_factory=set)
 
     @classmethod
-    def make(cls,kvs,infer_missing = False):
-        result = cls.from_dict(kvs,infer_missing = infer_missing)
+    def make(cls,kvs):
+        result = cls.from_dict(kvs,infer_missing = True)
         used = set(result.used)
         deps = set(result.deps)
         return replace(result,used = used,deps = deps)
@@ -194,17 +173,35 @@ class CoverageOrigin(Origin):
 
 @record
 class TableDefinition(Definition):
-    # fields
-    flds: dict[str,Field] = field(default_factory=dict)
-    # metatable
+    # metatable / metamethods
     meta: Optional[Type] = None
     # override operator overloads
     over: dict[BuiltinOperator,str] = field(default_factory=dict)
+    # is immutable ('exact' class)
+    imut: bool = False
+    
+    # list/array part
+    # explicit positional types
+    args: list[Field] = field(default_factory=list)
+    # type of all other positions
+    varg: Optional[Field] = None
+
+    # map/hash part
+    # fields have keys that can be joined via `.`
+    flds: dict[str,Field] = field(default_factory=dict)
+    # mappings for individual literal values
+    lmap: dict[str,Field] = field(default_factory=dict)
+    # mappings for builtin types
+    bmap: dict[BuiltinType,Field] = field(default_factory=dict)
+    # mappings for defined types
+    dmap: dict[str,Field] = field(default_factory=dict)
 
 @record
 class FunctionDefinition(Definition):
     args: Optional[list[Param]] = None
+    varg: Optional[Field] = None
     rets: Optional[list[Param]] = None
+    vret: Optional[Field] = None
 
 
 ## Structure

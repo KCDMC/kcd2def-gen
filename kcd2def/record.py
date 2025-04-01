@@ -68,11 +68,17 @@ class Record(DataClassJsonMixin):
 
     @classmethod
     def pure(cls):
+        "is pure (frozen dataclass)"
         return False
 
     @classmethod
-    def make(cls,kvs,infer_missing = False) -> 'Record':
-        return cls.from_dict(kvs,infer_missing = infer_missing)
+    def poly(cls):
+        "is polymorphic (save 'kind' field)"
+        return True
+
+    @classmethod
+    def make(cls,kvs) -> 'Record':
+        return cls.from_dict(kvs,infer_missing = True)
 
 
 def merge_pair(p):
@@ -130,24 +136,49 @@ def merge(a,b):
 
 ## Conversions
 
-def into_dict(record: Record) -> dict:
-    return record.to_dict()
+def reduce(data):
+    if isinstance(data,dict):
+        kind = data.get('kind',None)
+        if kind is None:
+            for v in data.values():
+                reduce(v)
+        else:
+            cls = records[kind]
+            poly = cls.poly()
+            for fld in fields(cls):
+                k = fld.name
+                if not poly or k != 'kind':
+                    v = data[k]
+                    if fld.default_factory is not None and not v:
+                        del data[k]
+                    elif v == fld.default:
+                        del data[k]
+                    else:
+                        reduce(v)
+    elif isinstance(data,list):
+        for v in data:
+            reduce(v)
 
-def into_json(record: Record) -> str:
-    return dumps(into_dict(record),indent = 2)
-
-def convert(data,idx=None):
+def convert(data):
     if isinstance(data,dict):
         kind = data.get('kind',None)
         for k,v in data.copy().items():
-            data[k] = convert(v,k)
+            data[k] = convert(v)
         if kind is not None:
             cls = records[kind]
             return cls.make(data)
     elif isinstance(data,list):
         for i,v in enumerate(data):
-            data[i] = convert(v,i)
+            data[i] = convert(v)
     return data
+
+def into_dict(record: Record) -> dict:
+    data = record.to_dict()
+    reduce(data)
+    return data
+
+def into_json(record: Record) -> str:
+    return dumps(into_dict(record),indent = 2)
 
 def from_dict(data: dict) -> Record:
     return convert(data)
