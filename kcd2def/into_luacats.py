@@ -229,7 +229,7 @@ def generate_defs(root: schema.Root) -> dict[str,str]:
             lines.append(line)
             
         elif isinstance(defn, schema.TableDefinition):
-            header = f"---@class {NAMESPACE}*{name}"
+            header = f"---@class {'(exact) ' if defn.imut else ''}{NAMESPACE}*{name}"
             meta = defn.meta
             if meta is None:
                 meta = BUILTINS_REDIRECT.get(name,None)
