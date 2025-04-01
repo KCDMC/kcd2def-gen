@@ -191,7 +191,12 @@ def generate_defs(root: schema.Root) -> dict[str,str]:
                     #TODO: check, do multiple return lines work?
                     lines.append(f'---@return {type_union(t,builtins,shown)} {n} {d}')
             if orig_file is not None:
-                lines.append(f'---@source {orig_file.file}')
+                src = orig_file.file
+                if orig_file.line is not None:
+                    src += ':' + str(orig_file.line)
+                    if orig_file.init is not None:
+                        src += ':' + str(orig_file.init)
+                lines.append(f'---@source {src}')
             if not defn.good:
                 lines.append('---@deprecated')
                 
