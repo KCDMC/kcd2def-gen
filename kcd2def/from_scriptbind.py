@@ -55,17 +55,17 @@ class State:
 
 def parse_scriptbind_html_method(state, path, info, method, params):
     data = None
-    with open(path) as file:
-        data = file.read()
+    #with open(path) as file:
+    #    data = file.read()
     
-    soup = Soup(data,features="xml")
+    #soup = Soup(data,features="xml")
 
 def parse_scriptbind_html_overloads(state, path, info, overload):
     data = None
-    with open(path) as file:
-        data = file.read()
+    #with open(path) as file:
+    #    data = file.read()
     
-    soup = Soup(data,features="xml")
+    #soup = Soup(data,features="xml")
 
 def parse_scriptbind_html_methods(state, path, info):
     data = None
@@ -135,7 +135,7 @@ def prepare_info(state: State):
 
         if info.methods is not None:
             for method in info.methods.values():
-                fld = schema.FunctionDefinition()
+                fld = schema.Field()
                 fld.desc = method.description
                 defn.flds[method.method_name] = fld
         
